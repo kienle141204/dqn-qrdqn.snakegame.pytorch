@@ -118,7 +118,6 @@ def train_cnn_dqn(episodes=3000, grid_size=10, batch_size=64, target_update=50):
             state = next_state
             total_reward += reward
             
-            # Train multiple times per step for better sample efficiency
             for _ in range(2):
                 loss = agent.train(batch_size)
                 if loss is not None:
@@ -159,7 +158,7 @@ def train_cnn_dqn(episodes=3000, grid_size=10, batch_size=64, target_update=50):
                   f"Avg50: {np.mean(recent_scores):5.2f} | "
                   f"Avg100: {avg_score:5.2f} | "
                   f"Best: {best_avg_score:5.2f} | "
-                  f"ε: {agent.epsilon:.3f} | "
+                  f"Epsilon: {agent.epsilon:.3f} | "
                   f"LR: {current_lr:.6f} | "
                   f"Loss: {np.mean(episode_loss) if episode_loss else 0:.4f} | "
                   f"Buffer: {len(agent.memory)}")
