@@ -3,6 +3,7 @@ import torch
 import numpy as np
 from network.cnn import CNNDQN
 from network.mlp import MLP
+from network.qr_dqn import QRDQN
 from game_env.snake_env import SnakeEnv  # Import env của bạn
 import sys
 import time
@@ -30,7 +31,8 @@ class SnakeGameVisualizer:
         
         # Load model
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = MLP(13, 4).to(self.device)
+        # self.model = MLP(13, 4).to(self.device)
+        self.model = QRDQN(13, 4).to(self.device)
         
         try:
             checkpoint = torch.load(model_path, map_location=self.device)
@@ -50,12 +52,25 @@ class SnakeGameVisualizer:
         self.best_score = 0
         self.current_score = 0
         
+    # def select_action(self, state):
+    #     """Chọn action từ model (không có epsilon)"""
+    #     with torch.no_grad():
+    #         state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+    #         q_values = self.model(state_tensor)
+    #         return q_values.max(1)[1].item()
     def select_action(self, state):
-        """Chọn action từ model (không có epsilon)"""
         with torch.no_grad():
-            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-            q_values = self.model(state_tensor)
-            return q_values.max(1)[1].item()
+            state_tensor = torch.FloatTensor(state).to(self.device)
+            
+            if hasattr(self.model, 'get_q_values'):
+                q_values = self.model.get_q_values(state_tensor)
+            else:
+                q_values = self.model(state_tensor)
+            
+            if q_values.dim() > 1:
+                return q_values[0].argmax().item()
+            else:
+                return q_values.argmax().item()
     
     def draw_snake(self):
         for x, y in self.env.snake:
@@ -92,7 +107,7 @@ class SnakeGameVisualizer:
         current_fps = fps
         
         print("\n" + "="*60)
-        print("🎮 SNAKE AI VISUAL TEST")
+        print("SNAKE AI VISUAL TEST")
         print("="*60)
         
         while running:
@@ -136,7 +151,7 @@ class SnakeGameVisualizer:
         
         # Print final stats
         print("\n" + "="*60)
-        print("📊 FINAL STATISTICS")
+        print("FINAL STATISTICS")
         print("="*60)
         print(f"Total Games: {self.total_games}")
         print(f"Average Score: {self.total_score / max(1, self.total_games):.2f}")
@@ -148,8 +163,8 @@ def main():
     """Main function"""
     import argparse
     parser = argparse.ArgumentParser(description='Test Snake AI with visualization')
-    # parser.add_argument('--model', type=str, default='logs/snake_cnn_dqn_best.pth',
-    #                    help='Path to model checkpoint')
+    parser.add_argument('--model', type=str, default='logs/snake_mlp_qrdqn_best_10.pth',
+                       help='Path to model checkpoint')
     parser.add_argument('--grid-size', type=int, default=10,
                        help='Grid size (default: 10)')
     parser.add_argument('--cell-size', type=int, default=40,

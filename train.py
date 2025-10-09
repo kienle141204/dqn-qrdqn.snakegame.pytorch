@@ -1,12 +1,14 @@
 import torch 
 from torch import optim, nn
-from network.mlp import MLP as DQN
+from network.mlp import MLP 
 from utils import ReplayBuffer
 import random
 import matplotlib.pyplot as plt
-from agent.snake_agent import snake_Agent 
+from agent.snake_agent import snake_Agent, snake_qrdqn_Agent 
 from game_env.snake_env import SnakeEnv
 import numpy as np
+from network.qr_dqn import QRDQN
+
 
 # def train_dqn(env, episodes=1000):
 #     state_dim = env.observation_space.shape[0]
@@ -144,7 +146,7 @@ def train_dqn(args, batch_size=64, target_update=50):
         # Save best model
         if avg_score > best_avg_score and len(scores) >= 50:
             best_avg_score = avg_score
-            agent.save(f'logs/snake_cnn_dqn_best_{args.grid_size}.pth')
+            agent.save(f'logs/snake_mlp_dqn_best_{args.grid_size}.pth')
         
         # Logging
         if episode % 50 == 0:
@@ -162,9 +164,78 @@ def train_dqn(args, batch_size=64, target_update=50):
         
         # Save checkpoint
         if episode % 500 == 0 and episode > 0:
-            agent.save(f'logs/checkpoint_cnn_ep{episode}_{args.grid_size}.pth')
+            agent.save(f'logs/checkpoint_dqn_ep{episode}_{args.grid_size}.pth')
     
     return agent, scores, losses, avg_scores
+
+def train_qrdqn(args, batch_size=64, target_update=50):
+    env = SnakeEnv(grid_size=args.grid_size)
+    agent = snake_qrdqn_Agent(grid_size=args.grid_size, action_size=4, 
+                              lr=0.0005, gamma=0.99, epsilon_decay=args.epsilon_decay)
+    scores = []
+    losses = []
+    avg_scores = []
+    best_avg_score = 0
+    state = env.reset()
+    for _ in range(1000):
+        action = random.randrange(4)
+        next_state, reward, done, _ = env.step(action)
+        agent.memory.push(state, action, reward, next_state, done)
+        state = next_state if not done else env.reset()
+    print("\n" + "="*70)
+    print("QR-DQN Training Started")
+    print("="*70)
+    for episode in range(args.episodes):
+        state = env.reset()
+        total_reward = 0
+        episode_loss = []
+        while True:
+            action = agent.select_action(state, training=True)
+            next_state, reward, done, _ = env.step(action)
+            agent.memory.push(state, action, reward, next_state, done)
+            state = next_state
+            total_reward += reward
+            for _ in range(2):
+                loss = agent.train(batch_size)
+                if loss is not None:
+                    episode_loss.append(loss)
+            if done:
+                break
+        scores.append(env.points)
+        if episode_loss:
+            losses.append(np.mean(episode_loss))
+        # Update target network more frequently
+        if episode % target_update == 0:
+            agent.update_target_network()
+        agent.update_epsilon()
+        # Learning rate decay
+        if episode % 200 == 0 and episode > 0:
+            agent.scheduler.step()
+        # Calculate metrics
+        avg_score = np.mean(scores[-100:]) if len(scores) >= 100 else np.mean(scores)
+        avg_scores.append(avg_score)
+        # Save best model
+        if avg_score > best_avg_score and len(scores) >= 50:
+            best_avg_score = avg_score
+            agent.save(f'logs/snake_mlp_qrdqn_best_{args.grid_size}.pth')
+        # Logging
+        if episode % 50 == 0:
+            current_lr = agent.optimizer.param_groups[0]['lr']
+            recent_scores = scores[-50:] if len(scores) >= 50 else scores
+            print(f"Ep {episode:4d}/{args.episodes} | "
+                  f"Score: {env.points:3d} | "
+                  f"Avg50: {np.mean(recent_scores):5.2f} | "
+                  f"Avg100: {avg_score:5.2f} | "
+                  f"Best: {best_avg_score:5.2f} | "
+                  f"Epsilon: {agent.epsilon:.3f} | "
+                  f"LR: {current_lr:.6f} | "
+                  f"Loss: {np.mean(episode_loss) if episode_loss else 0:.4f} | "
+                  f"Buffer: {len(agent.memory)}")
+        # Save checkpoint
+        if episode % 500 == 0 and episode > 0:
+            agent.save(f'logs/checkpoint_qrdqn_ep{episode}_{args.grid_size}.pth')
+    return agent, scores, losses, avg_scores
+
 
 def main():
     import argparse
@@ -177,7 +248,7 @@ def main():
                         help='Number of training episodes (default: 3000)')
     
     args = parser.parse_args()
-    train_dqn(args)
+    train_qrdqn(args)
 
 
 if __name__ == "__main__":
