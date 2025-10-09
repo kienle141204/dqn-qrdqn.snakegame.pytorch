@@ -4,6 +4,7 @@ import torch.optim as optim
 from utils import ReplayBuffer
 import random
 from network.cnn import CNNDQN
+from network.mlp import MLP
 
 
 class snake_Agent:
@@ -19,13 +20,15 @@ class snake_Agent:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         
         # Main network and target network
-        self.policy_net = CNNDQN(self.grid_size, action_size=action_size).to(self.device)
-        self.target_net = CNNDQN(self.grid_size, action_size=action_size).to(self.device)
+        # self.policy_net = CNNDQN(self.grid_size, action_size=action_size).to(self.device)
+        # self.target_net = CNNDQN(self.grid_size, action_size=action_size).to(self.device)
+        self.policy_net = MLP(13, action_size).to(self.device)
+        self.target_net = MLP(13, action_size).to(self.device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
         self.target_net.eval()
         
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
-        self.memory = ReplayBuffer()
+        self.memory = ReplayBuffer(100000)
         self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=500, gamma=0.9)
     
     def select_action(self, state,  training=True):

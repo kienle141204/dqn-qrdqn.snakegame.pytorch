@@ -8,9 +8,9 @@ class SnakeEnv(gym.Env):
         self.grid_size = grid_size
         self.action_space = spaces.Discrete(4)  # up, down, left, right
         self.observation_space = spaces.Box(
-            low=0, high=1, shape=(4, self.grid_size, self.grid_size), dtype=np.float32
+            low=0, high=1, shape=(13,), dtype=np.float32
         )
-        # self.start_point = (self.grid_size//2, self.grid_size//2)
+         
         self.max_steps = grid_size * grid_size * 2  # Giới hạn số bước
         self.reset()
     
@@ -35,34 +35,42 @@ class SnakeEnv(gym.Env):
                 return food
 
     def _get_obs(self):
-        """Trả về trạng thái dạng lưới one-hot: (4, grid_size, grid_size)
-        Kênh 0: đầu rắn
-        Kênh 1: thân rắn
-        Kênh 2: thức ăn
-        Kênh 3: tường
+        """Trả về vector observation tối ưu 13 chiều:
+        - 4 giá trị: nguy hiểm ở 4 hướng (up, down, left, right)
+        - 4 giá trị: hướng hiện tại (one-hot)
+        - 4 giá trị: hướng tới thức ăn (up, down, left, right)
+        - 1 giá trị: khoảng cách chuẩn hóa tới thức ăn
         """
-        grid = np.zeros((4, self.grid_size, self.grid_size), dtype=np.float32)
-
-        # Kênh 0: đầu rắn
         head_x, head_y = self.snake[0]
-        grid[0, head_x, head_y] = 1.0
-
-        # Kênh 1: thân rắn (trừ đầu)
-        for (x, y) in self.snake[1:]:
-            grid[1, x, y] = 1.0
-
-        # Kênh 2: thức ăn
         food_x, food_y = self.food
-        grid[2, food_x, food_y] = 1.0
-
-        # Kênh 3: tường 
-        grid[3, 0, :] = 1.0
-        grid[3, -1, :] = 1.0
-        grid[3, :, 0] = 1.0
-        grid[3, :, -1] = 1.0
-
-        return grid
-
+        
+        # Kiểm tra nguy hiểm ở 4 hướng (va chạm tường hoặc thân)
+        directions = [(-1, 0), (1, 0), (0, -1), (0, 1)]  # up, down, left, right
+        danger = []
+        for dx, dy in directions:
+            next_x, next_y = head_x + dx, head_y + dy
+            is_danger = (next_x < 0 or next_x >= self.grid_size or 
+                        next_y < 0 or next_y >= self.grid_size or 
+                        (next_x, next_y) in self.snake)
+            danger.append(1.0 if is_danger else 0.0)
+        
+        # Hướng hiện tại (one-hot encoding)
+        direction_vec = [0.0] * 4
+        direction_vec[self.current_direction] = 1.0
+        
+        # Hướng tới thức ăn (có thể có nhiều hướng = 1 nếu thức ăn ở góc chéo)
+        food_direction = [
+            1.0 if food_x < head_x else 0.0,  # food ở phía trên
+            1.0 if food_x > head_x else 0.0,  # food ở phía dưới
+            1.0 if food_y < head_y else 0.0,  # food ở bên trái
+            1.0 if food_y > head_y else 0.0,  # food ở bên phải
+        ]
+        
+        distance = (abs(head_x - food_x) + abs(head_y - food_y)) / (2 * self.grid_size)
+        
+        # Ghép tất cả thành vector 13 chiều
+        obs = np.array(danger + direction_vec + food_direction + [distance], dtype=np.float32)
+        return obs
     
     def step(self, action):
         self.steps += 1
@@ -89,7 +97,7 @@ class SnakeEnv(gym.Env):
 
         new_distance = abs(head_x - self.food[0]) + abs(head_y - self.food[1])
         
-        # Check collision
+        # Kiểm tra va chạm
         if (head_x < 0 or head_x >= self.grid_size or 
             head_y < 0 or head_y >= self.grid_size or 
             (head_x, head_y) in self.snake):
@@ -98,7 +106,7 @@ class SnakeEnv(gym.Env):
         else:
             self.snake.insert(0, (head_x, head_y))
             
-            # 
+            # Ăn được thức ăn
             if (head_x, head_y) == self.food:
                 reward = 10
                 self.points += 1
