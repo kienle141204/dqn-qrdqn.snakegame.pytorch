@@ -7,8 +7,8 @@ from network.cnn import CNNDQN
 
 
 class snake_Agent:
-    def __init__(self, grid_size, action_size, lr=0.01, gamma=0.9, 
-                 epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=0.9995):
+    def __init__(self, grid_size, action_size, lr=0.0005, gamma=0.99, 
+                 epsilon_start=1.0, epsilon_end=0.01, epsilon_decay=0.995):
         self.grid_size = grid_size
         self.action_size = action_size
         self.gamma = gamma
@@ -26,7 +26,7 @@ class snake_Agent:
         
         self.optimizer = optim.Adam(self.policy_net.parameters(), lr=lr)
         self.memory = ReplayBuffer()
-        self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=250, gamma=0.9)
+        self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=500, gamma=0.9)
     
     def select_action(self, state,  training=True):
         if training and random.random() < self.epsilon:
@@ -57,11 +57,12 @@ class snake_Agent:
         target_q_values = rewards + (1 - dones) * self.gamma * next_q_values
         
         # Compute loss
-        loss = nn.MSELoss()(current_q_values.squeeze(), target_q_values)
+        loss = nn.SmoothL1Loss()(current_q_values.squeeze(), target_q_values)
         
         # Optimize
         self.optimizer.zero_grad()
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(self.policy_net.parameters(), 1.0) 
         self.optimizer.step()
         
         return loss.item()

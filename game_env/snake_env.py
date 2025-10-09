@@ -7,21 +7,24 @@ class SnakeEnv(gym.Env):
         super(SnakeEnv, self).__init__()
         self.grid_size = grid_size
         self.action_space = spaces.Discrete(4)  # up, down, left, right
-        # State space: continuous vector
         self.observation_space = spaces.Box(
             low=0, high=1, shape=(4, self.grid_size, self.grid_size), dtype=np.float32
         )
-        self.start_point = (self.grid_size//2, self.grid_size//2)
-        self.max_steps = grid_size * grid_size * grid_size  # Giới hạn số bước
+        # self.start_point = (self.grid_size//2, self.grid_size//2)
+        self.max_steps = grid_size * grid_size * 2  # Giới hạn số bước
         self.reset()
     
     def reset(self):
-        self.snake = [self.start_point]
+        start_x = np.random.randint(2, self.grid_size - 2)
+        start_y = np.random.randint(2, self.grid_size - 2)
+        self.snake = [(start_x, start_y)]
+
         self.food = self._generate_food()
         self.current_direction = 1  # 0: up, 1: down, 2: left, 3: right
         self.done = False
         self.steps = 0
         self.points = 0
+        self.steps_since_food = 0
         return self._get_obs()
 
     def _generate_food(self):
@@ -63,18 +66,18 @@ class SnakeEnv(gym.Env):
     
     def step(self, action):
         self.steps += 1
+        self.steps_since_food += 1
         head_x, head_y = self.snake[0]
         
-        # Prevent 180-degree turns
         if (action == 0 and self.current_direction == 1) or \
            (action == 1 and self.current_direction == 0) or \
            (action == 2 and self.current_direction == 3) or \
            (action == 3 and self.current_direction == 2):
-            action = self.current_direction  # Keep current direction
+            action = self.current_direction  
         
         self.current_direction = action
+        old_distance = abs(head_x - self.food[0]) + abs(head_y - self.food[1])
         
-        # Move
         if action == 0:  # up
             head_x -= 1
         elif action == 1:  # down
@@ -83,6 +86,8 @@ class SnakeEnv(gym.Env):
             head_y -= 1
         else:  # right
             head_y += 1
+
+        new_distance = abs(head_x - self.food[0]) + abs(head_y - self.food[1])
         
         # Check collision
         if (head_x < 0 or head_x >= self.grid_size or 
@@ -93,17 +98,25 @@ class SnakeEnv(gym.Env):
         else:
             self.snake.insert(0, (head_x, head_y))
             
-            # Check if ate food
+            # 
             if (head_x, head_y) == self.food:
                 reward = 10
                 self.points += 1
                 self.food = self._generate_food()
+                self.steps_since_food = 0
             else:
-                reward = -0.01  # Small negative reward to encourage efficiency
+                if new_distance < old_distance:
+                    reward = 0.1  
+                else:
+                    reward = -0.15  
+                
+                if self.steps_since_food > self.grid_size * 2:
+                    reward -= 0.05
+                
                 self.snake.pop()
         
-        # Check if exceeded max steps
         if self.steps >= self.max_steps:
+            reward -= 0.5  
             self.done = True
             
         return self._get_obs(), reward, self.done, {}

@@ -81,14 +81,25 @@ def train_dqn(env, episodes=1000):
     torch.save(q_net.state_dict(), "logs/dqn_cartpole.pth")
     return q_net, rewards_history
 
-def train_cnn_dqn(episodes=2000, grid_size=10, batch_size=64, target_update=10):
+def train_cnn_dqn(episodes=3000, grid_size=10, batch_size=64, target_update=50):
     env = SnakeEnv(grid_size=grid_size)
-    agent = snake_Agent(grid_size=grid_size, action_size=4)
+    agent = snake_Agent(grid_size=grid_size, action_size=4, 
+                        lr=0.0005, gamma=0.99, epsilon_decay=0.997)  
     
     scores = []
     losses = []
     avg_scores = []
     best_avg_score = 0
+    
+    print("\n" + "="*70)
+    print("Warm-up Phase: Collecting initial experiences...")
+    print("="*70)
+    state = env.reset()
+    for _ in range(1000):
+        action = random.randrange(4)
+        next_state, reward, done, _ = env.step(action)
+        agent.memory.push(state, action, reward, next_state, done)
+        state = next_state if not done else env.reset()
     
     print("\n" + "="*70)
     print("CNN-DQN Training Started")
@@ -107,10 +118,11 @@ def train_cnn_dqn(episodes=2000, grid_size=10, batch_size=64, target_update=10):
             state = next_state
             total_reward += reward
             
-            # Train
-            loss = agent.train(batch_size)
-            if loss is not None:
-                episode_loss.append(loss)
+            # Train multiple times per step for better sample efficiency
+            for _ in range(2):
+                loss = agent.train(batch_size)
+                if loss is not None:
+                    episode_loss.append(loss)
             
             if done:
                 break
@@ -119,14 +131,14 @@ def train_cnn_dqn(episodes=2000, grid_size=10, batch_size=64, target_update=10):
         if episode_loss:
             losses.append(np.mean(episode_loss))
         
-        # Update target network
+        # Update target network more frequently
         if episode % target_update == 0:
             agent.update_target_network()
         
         agent.update_epsilon()
         
         # Learning rate decay
-        if episode % 50 == 0 and episode > 0:
+        if episode % 200 == 0 and episode > 0:
             agent.scheduler.step()
         
         # Calculate metrics
@@ -134,17 +146,19 @@ def train_cnn_dqn(episodes=2000, grid_size=10, batch_size=64, target_update=10):
         avg_scores.append(avg_score)
         
         # Save best model
-        if avg_score > best_avg_score and len(scores) >= 100:
+        if avg_score > best_avg_score and len(scores) >= 50:
             best_avg_score = avg_score
             agent.save('logs/snake_cnn_dqn_best.pth')
         
         # Logging
         if episode % 50 == 0:
             current_lr = agent.optimizer.param_groups[0]['lr']
+            recent_scores = scores[-50:] if len(scores) >= 50 else scores
             print(f"Ep {episode:4d}/{episodes} | "
                   f"Score: {env.points:3d} | "
-                  f"Avg: {avg_score:6.2f} | "
-                  f"Best: {best_avg_score:6.2f} | "
+                  f"Avg50: {np.mean(recent_scores):5.2f} | "
+                  f"Avg100: {avg_score:5.2f} | "
+                  f"Best: {best_avg_score:5.2f} | "
                   f"ε: {agent.epsilon:.3f} | "
                   f"LR: {current_lr:.6f} | "
                   f"Loss: {np.mean(episode_loss) if episode_loss else 0:.4f} | "
@@ -155,52 +169,6 @@ def train_cnn_dqn(episodes=2000, grid_size=10, batch_size=64, target_update=10):
             agent.save(f'logs/checkpoint_cnn_ep{episode}.pth')
     
     return agent, scores, losses, avg_scores
-
-
-def plot_training_results(scores, avg_scores, losses):
-    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
-    
-    # Scores over time
-    axes[0, 0].plot(scores, alpha=0.3, label='Episode Score', color='skyblue')
-    axes[0, 0].plot(avg_scores, label='100-Episode Average', linewidth=2.5, color='darkblue')
-    axes[0, 0].set_xlabel('Episode', fontsize=12)
-    axes[0, 0].set_ylabel('Score', fontsize=12)
-    axes[0, 0].set_title('Training Progress', fontsize=14, fontweight='bold')
-    axes[0, 0].legend(fontsize=10)
-    axes[0, 0].grid(True, alpha=0.3)
-    
-    # Loss over time
-    if losses:
-        axes[0, 1].plot(losses, alpha=0.7, color='coral', linewidth=1.5)
-        axes[0, 1].set_xlabel('Episode', fontsize=12)
-        axes[0, 1].set_ylabel('Loss', fontsize=12)
-        axes[0, 1].set_title('Training Loss', fontsize=14, fontweight='bold')
-        axes[0, 1].grid(True, alpha=0.3)
-    
-    # Score distribution
-    axes[1, 0].hist(scores, bins=30, alpha=0.7, color='lightgreen', edgecolor='darkgreen')
-    axes[1, 0].axvline(np.mean(scores), color='red', linestyle='--', linewidth=2, label=f'Mean: {np.mean(scores):.2f}')
-    axes[1, 0].set_xlabel('Score', fontsize=12)
-    axes[1, 0].set_ylabel('Frequency', fontsize=12)
-    axes[1, 0].set_title('Score Distribution', fontsize=14, fontweight='bold')
-    axes[1, 0].legend(fontsize=10)
-    axes[1, 0].grid(True, alpha=0.3, axis='y')
-    
-    # Moving averages
-    for window, color in [(10, 'lightblue'), (50, 'blue'), (100, 'darkblue')]:
-        if len(scores) >= window:
-            ma = [np.mean(scores[max(0, i-window):i+1]) for i in range(len(scores))]
-            axes[1, 1].plot(ma, label=f'{window}-Episode MA', linewidth=2, color=color)
-    axes[1, 1].set_xlabel('Episode', fontsize=12)
-    axes[1, 1].set_ylabel('Average Score', fontsize=12)
-    axes[1, 1].set_title('Moving Averages Comparison', fontsize=14, fontweight='bold')
-    axes[1, 1].legend(fontsize=10)
-    axes[1, 1].grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig('cnn_dqn_training_results.png', dpi=150, bbox_inches='tight')
-    plt.show()
-    print("✓ Training results saved to 'cnn_dqn_training_results.png'")
 
 
 
