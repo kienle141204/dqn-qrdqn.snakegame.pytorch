@@ -1,77 +1,78 @@
 import pygame
 import torch
 import numpy as np
-from network.cnn import CNNDQN
+import sys
+import argparse
+
 from network.mlp import MLP
 from network.qr_dqn import QRDQN
-from game_env.snake_env import SnakeEnv  # Import env của bạn
-import sys
-import time
+from game_env.snake_env import SnakeEnv 
 
 class SnakeGameVisualizer:
-    def __init__(self, grid_size=10, cell_size=40, model_path='logs/snake_cnn_dqn_best.pth'):
-        self.model_path = f"logs/snake_cnn_dqn_best_{grid_size}.pth"
-        self.grid_size = grid_size
-        self.cell_size = cell_size
-        self.window_size = grid_size * cell_size
-        
-        # Colors
+    def __init__(self, args):
+        self.grid_size = args.grid_size
+        self.cell_size = args.cell_size
+        self.window_size = self.grid_size * self.cell_size
+        self.agent_type = args.agent_type
+
         self.BLACK = (0, 0, 0)
         self.WHITE = (255, 255, 255)
         self.RED = (255, 0, 0)
         self.GREEN = (0, 255, 0)
         
-        # Pygame setup
         pygame.init()
         self.screen = pygame.display.set_mode((self.window_size, self.window_size))
-        pygame.display.set_caption('Snake AI - DQN Test')
+        pygame.display.set_caption(f'Snake AI - {self.agent_type.upper()} Test')
         self.clock = pygame.time.Clock()
         self.font = pygame.font.Font(None, 30)
-        self.big_font = pygame.font.Font(None, 50)
         
-        # Load model
+        # load model 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        # self.model = MLP(13, 4).to(self.device)
-        self.model = QRDQN(13, 4).to(self.device)
-        
-        try:
-            checkpoint = torch.load(model_path, map_location=self.device)
-            self.model.load_state_dict(checkpoint['policy_net'])
-            self.model.eval()
-            print(f"Model loaded from {model_path}")
-        except Exception as e:
-            print(f"Error loading model: {e}")
+
+        # Select model 
+        if self.agent_type == 'dqn':
+            self.model = MLP(13, 4).to(self.device)
+            self.model_path = f"logs/snake_dqn_best_grid{self.grid_size}.pth"
+        elif self.agent_type == 'qr-dqn':
+            self.model = QRDQN(13, 4).to(self.device)
+            self.model_path = f"logs/snake_qr-dqn_best_grid{self.grid_size}.pth"
+        else:
+            print(f"Error: Unknown agent type '{self.agent_type}'")
             sys.exit(1)
         
-        # Environment
-        self.env = SnakeEnv(grid_size=grid_size)
+        # Load the trained weights
+        try:
+            checkpoint = torch.load(self.model_path, map_location=self.device)
+            self.model.load_state_dict(checkpoint['policy_net'])
+            self.model.eval()
+            print(f"Model loaded successfully from {self.model_path}")
+        except FileNotFoundError:
+            print(f"Error: Model file not found at {self.model_path}")
+            print("Please make sure you have trained the model first and the path is correct.")
+            sys.exit(1)
+        except Exception as e:
+            print(f"An error occurred while loading the model: {e}")
+            sys.exit(1)
         
-        # Stats
+        self.env = SnakeEnv(grid_size=self.grid_size)
+        
         self.total_games = 0
         self.total_score = 0
         self.best_score = 0
         self.current_score = 0
         
-    # def select_action(self, state):
-    #     """Chọn action từ model (không có epsilon)"""
-    #     with torch.no_grad():
-    #         state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
-    #         q_values = self.model(state_tensor)
-    #         return q_values.max(1)[1].item()
     def select_action(self, state):
         with torch.no_grad():
-            state_tensor = torch.FloatTensor(state).to(self.device)
+            state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
             
-            if hasattr(self.model, 'get_q_values'):
-                q_values = self.model.get_q_values(state_tensor)
-            else:
+            if self.agent_type == 'dqn':
                 q_values = self.model(state_tensor)
-            
-            if q_values.dim() > 1:
-                return q_values[0].argmax().item()
-            else:
-                return q_values.argmax().item()
-    
+                return q_values.max(1)[1].item()
+            elif self.agent_type == 'qr-dqn':
+                quantiles = self.model(state_tensor)
+                q_values = quantiles.mean(dim=2)
+                return q_values.max(1)[1].item()
+
     def draw_snake(self):
         for x, y in self.env.snake:
             rect = pygame.Rect(
@@ -83,7 +84,6 @@ class SnakeGameVisualizer:
             pygame.draw.rect(self.screen, self.GREEN, rect)
     
     def draw_food(self):
-        """Vẽ thức ăn"""
         x, y = self.env.food
         pygame.draw.circle(
             self.screen, 
@@ -94,20 +94,18 @@ class SnakeGameVisualizer:
         )
     
     def draw_score(self):
-            score_text = self.font.render(f"Score: {self.current_score}", True, self.WHITE)  
-            self.screen.blit(score_text, (10, 10)) 
-    
+        score_text = self.font.render(f"Score: {self.current_score}", True, self.WHITE)  
+        self.screen.blit(score_text, (10, 10)) 
 
     def run(self, fps=10):
-        """Chạy game loop"""
         state = self.env.reset()
         running = True
         paused = False
         game_over = False
-        current_fps = fps
         
         print("\n" + "="*60)
         print("SNAKE AI VISUAL TEST")
+        print("Controls: [SPACE] to Pause/Resume, [R] to Reset, [Q] to Quit")
         print("="*60)
         
         while running:
@@ -122,8 +120,9 @@ class SnakeGameVisualizer:
                         state = self.env.reset()
                         game_over = False
                         self.current_score = 0
+                    elif event.key == pygame.K_q:
+                        running = False
             
-            # Update game state
             if not paused and not game_over:
                 action = self.select_action(state)
                 next_state, reward, done, _ = self.env.step(action)
@@ -145,7 +144,7 @@ class SnakeGameVisualizer:
             self.draw_score()
             
             pygame.display.flip()
-            self.clock.tick(current_fps)
+            self.clock.tick(fps)
         
         pygame.quit()
         
@@ -153,32 +152,31 @@ class SnakeGameVisualizer:
         print("\n" + "="*60)
         print("FINAL STATISTICS")
         print("="*60)
-        print(f"Total Games: {self.total_games}")
-        print(f"Average Score: {self.total_score / max(1, self.total_games):.2f}")
-        print(f"Best Score: {self.best_score}")
+        if self.total_games > 0:
+            print(f"Total Games Played: {self.total_games}")
+            print(f"Average Score: {self.total_score / self.total_games:.2f}")
+            print(f"Best Score: {self.best_score}")
+        else:
+            print("No games were completed.")
         print("="*60)
 
 
 def main():
-    """Main function"""
-    import argparse
-    parser = argparse.ArgumentParser(description='Test Snake AI with visualization')
-    parser.add_argument('--model', type=str, default='logs/snake_mlp_qrdqn_best_10.pth',
-                       help='Path to model checkpoint')
+    """Main function to parse arguments and run the visualizer."""
+    parser = argparse.ArgumentParser(description='Test a trained Snake AI model with visualization')
+    
+    parser.add_argument('--agent-type', type=str, default='dqn', choices=['dqn', 'qr-dqn'],
+                        help='The type of agent model to test (dqn or qr-dqn). Default: dqn')
     parser.add_argument('--grid-size', type=int, default=10,
-                       help='Grid size (default: 10)')
+                        help='The grid size the model was trained on. Default: 10')
     parser.add_argument('--cell-size', type=int, default=40,
-                       help='Cell size in pixels (default: 40)')
-    parser.add_argument('--fps', type=int, default=30,
-                       help='Initial FPS (default: 10)')
+                        help='The size of each cell in pixels for display. Default: 40')
+    parser.add_argument('--fps', type=int, default=15,
+                        help='Frames per second for the visualization. Default: 15')
     
     args = parser.parse_args()
     
-    visualizer = SnakeGameVisualizer(
-        grid_size=args.grid_size,
-        cell_size=args.cell_size,
-        model_path=args.model
-    )
+    visualizer = SnakeGameVisualizer(args)
     visualizer.run(fps=args.fps)
 
 
