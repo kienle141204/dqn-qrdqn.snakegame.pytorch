@@ -12,7 +12,7 @@ class SnakeGameVisualizer:
     def __init__(self, args):
         self.grid_size = args.grid_size
         self.cell_size = args.cell_size
-        self.window_size = self.grid_size * self.cell_size
+        self.window_size = self.grid_size * self.cell_size * 2
         self.agent_type = args.agent_type
 
         self.BLACK = (0, 0, 0)
@@ -54,7 +54,7 @@ class SnakeGameVisualizer:
             print(f"An error occurred while loading the model: {e}")
             sys.exit(1)
         
-        self.env = SnakeEnv(grid_size=self.grid_size)
+        self.env = SnakeEnv(grid_size=self.grid_size * 2)
         
         self.total_games = 0
         self.total_score = 0
