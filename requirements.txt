@@ -1,4 +1,7 @@
 numpy
+ipykernel
+sb3-contrib
+stable-baselines3
 gym
 pygame
 gymnasium
